@@ -1,9 +1,9 @@
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
-use std::mem;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
+use std::{fmt, mem};
 
 use dispatch2::MainThreadBound;
 use objc2::MainThreadMarker;
@@ -17,7 +17,7 @@ use winit_common::event_handler::EventHandler;
 use winit_core::application::ApplicationHandler;
 use winit_core::data_transfer::DataTransferId;
 use winit_core::event::{StartCause, WindowEvent};
-use winit_core::event_loop::{ControlFlow, DndAction};
+use winit_core::event_loop::{ControlFlow, DndAction, EventLoopProxyProvider};
 use winit_core::window::WindowId;
 
 use super::event_loop::{ActiveEventLoop, notify_windows_of_exit, stop_app_immediately};
@@ -37,6 +37,14 @@ pub(super) struct AppState {
     run_loop: MainRunLoop,
     event_loop_proxy: Arc<EventLoopProxy>,
     event_handler: EventHandler,
+    /// Set when the proxy's run loop source was performed while the event handler was in use,
+    /// which happens when a nested run loop is spun from inside an event callback (a modal, an
+    /// AppKit call that waits by running the loop, a library waiting on a callback). The wake-up
+    /// is delivered again once the handler has returned; see `flush_deferred`.
+    proxy_wake_deferred: Cell<bool>,
+    /// Queued event callbacks that a nested run loop tried to run while the event handler was in
+    /// use. Re-queued once the handler has returned; see `flush_deferred`.
+    deferred: RefCell<DeferredQueue>,
     stop_on_launch: Cell<bool>,
     stop_before_wait: Cell<bool>,
     stop_after_wait: Cell<bool>,
@@ -55,6 +63,16 @@ pub(super) struct AppState {
     windows: RefCell<HashMap<WindowId, MainThreadBound<Weak<WindowDelegate>>>>,
     // NOTE: This is strongly referenced by our `NSWindowDelegate` and our `NSView` subclass, and
     // as such should be careful to not add fields that, in turn, strongly reference those.
+}
+
+/// The callbacks parked by `AppState::run_queued`, in the order they were queued.
+#[derive(Default)]
+struct DeferredQueue(Vec<Box<dyn FnOnce()>>);
+
+impl fmt::Debug for DeferredQueue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeferredQueue").field("len", &self.0.len()).finish()
+    }
 }
 
 #[derive(Debug)]
@@ -76,7 +94,15 @@ impl AppState {
         activate_ignoring_other_apps: bool,
     ) -> Option<Rc<Self>> {
         let event_loop_proxy = Arc::new(EventLoopProxy::new(mtm, move || {
-            Self::get(mtm).with_handler(|app, event_loop| app.proxy_wake_up(event_loop));
+            let this = Self::get(mtm);
+            // The source lives in the common modes, so a nested run loop started from inside an
+            // event callback performs it while the handler is still borrowed. The wake-up is not
+            // lost: it is delivered again as soon as the handler returns.
+            if this.event_handler.in_use() {
+                this.proxy_wake_deferred.set(true);
+            } else {
+                this.with_handler(|app, event_loop| app.proxy_wake_up(event_loop));
+            }
         }));
 
         let this = Rc::new(Self {
@@ -89,6 +115,8 @@ impl AppState {
             run_loop: MainRunLoop::get(mtm),
             event_loop_proxy,
             event_handler: EventHandler::new(),
+            proxy_wake_deferred: Cell::new(false),
+            deferred: RefCell::new(DeferredQueue::default()),
             stop_on_launch: Cell::new(false),
             stop_before_wait: Cell::new(false),
             stop_after_wait: Cell::new(false),
@@ -315,9 +343,22 @@ impl AppState {
         } else {
             tracing::debug!("had to queue event since another is currently being handled");
             let this = Rc::clone(self);
-            self.run_loop.queue_closure(move || {
-                this.with_handler(callback);
-            });
+            self.run_loop.queue_closure(move || this.run_queued(callback));
+        }
+    }
+
+    /// Run a queued event callback, unless the queue was reached from a nested run loop while
+    /// the handler is still in use, in which case the callback is parked until the handler has
+    /// returned, and then queued again.
+    fn run_queued(
+        self: &Rc<Self>,
+        callback: impl FnOnce(&mut dyn ApplicationHandler, &ActiveEventLoop) + 'static,
+    ) {
+        if self.event_handler.in_use() {
+            let this = Rc::clone(self);
+            self.deferred.borrow_mut().0.push(Box::new(move || this.run_queued(callback)));
+        } else {
+            self.with_handler(callback);
         }
     }
 
@@ -328,6 +369,23 @@ impl AppState {
     ) {
         let event_loop = ActiveEventLoop { app_state: Rc::clone(self), mtm: self.mtm };
         self.event_handler.handle(|app| callback(app, &event_loop));
+        self.flush_deferred();
+    }
+
+    /// Hand back whatever a nested run loop tried to deliver while the handler was in use.
+    ///
+    /// Nothing runs here: the handler that just returned may have been reached from `drawRect:`
+    /// or a delegate callback, and the deferred work should get the same top-level turn of the
+    /// main run loop it would have had without the nesting. Queued callbacks go back on the
+    /// queue in their original order, and a deferred wake-up signals the proxy's source again.
+    fn flush_deferred(&self) {
+        let deferred = mem::take(&mut self.deferred.borrow_mut().0);
+        for closure in deferred {
+            self.run_loop.queue_closure(closure);
+        }
+        if self.proxy_wake_deferred.take() {
+            self.event_loop_proxy.wake_up();
+        }
     }
 
     /// dispatch `NewEvents(Init)` + `Resumed`
