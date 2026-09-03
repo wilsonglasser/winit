@@ -6,7 +6,7 @@ use std::rc::Rc;
 use dpi::{LogicalPosition, PhysicalSize};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
-use objc2::{AnyThread, DefinedClass, MainThreadMarker, define_class, msg_send};
+use objc2::{AnyThread, DefinedClass, MainThreadMarker, Message, define_class, msg_send};
 use objc2_app_kit::{
     NSApplication, NSCursor, NSDragOperation, NSDraggingSession, NSEvent, NSEventPhase,
     NSResponder, NSTextInputClient, NSTrackingArea, NSTrackingAreaOptions, NSView,
@@ -128,6 +128,9 @@ pub struct ViewState {
     phys_modifiers: RefCell<HashMap<Key, ModLocationMask>>,
     ime_state: Cell<ImeState>,
     input_source: RefCell<String>,
+
+    /// True if this view was in a preedit session that will result in a commit.
+    pending_commit: Cell<bool>,
 
     /// True iff the application wants IME events.
     ///
@@ -292,6 +295,7 @@ define_class!(
                 // In case the preedit was cleared, set IME into the Ground state.
                 self.ivars().ime_state.set(ImeState::Ground);
             }
+            self.ivars().pending_commit.set(true);
 
             let string = string.to_string();
             let cursor_range = if string.is_empty() {
@@ -335,7 +339,9 @@ define_class!(
         #[unsafe(method_id(validAttributesForMarkedText))]
         fn valid_attributes_for_marked_text(&self) -> Retained<NSArray<NSAttributedStringKey>> {
             let _entered = trace_span!("validAttributesForMarkedText").entered();
-            NSArray::new()
+            let underline_style = NSString::from_str("NSUnderlineStyle");
+            let marked_clause = NSString::from_str("NSMarkedClauseSegment");
+            NSArray::from_slice(&[&*underline_style, &*marked_clause])
         }
 
         #[unsafe(method_id(attributedSubstringForProposedRange:actualRange:))]
@@ -389,10 +395,20 @@ define_class!(
             };
 
             let is_control = string.chars().next().is_some_and(|c| c.is_control());
+            let has_marked = self.hasMarkedText();
+            let pending_commit = self.ivars().pending_commit.get();
+            let ime_enabled = self.is_ime_enabled();
 
-            // Commit only if we have marked text.
-            if self.hasMarkedText() && self.is_ime_enabled() && !is_control {
+            // Clear preedit if there is marked text.
+            if has_marked {
                 self.queue_event(WindowEvent::Ime(Ime::Preedit(String::new(), None)));
+            }
+
+            // Only commit via IME if there was a real composition session.
+            // Some IMEs send insertText for all typing (e.g. spaces, English chars)
+            // which should go through keyboard input instead of paste.
+            if pending_commit && ime_enabled && !is_control {
+                self.ivars().pending_commit.set(false);
                 self.queue_event(WindowEvent::Ime(Ime::Commit(string)));
                 self.ivars().ime_state.set(ImeState::Committed);
             }
@@ -816,6 +832,7 @@ impl WinitView {
             phys_modifiers: Default::default(),
             ime_state: Default::default(),
             input_source: Default::default(),
+            pending_commit: Default::default(),
             ime_capabilities: Default::default(),
             forward_key_to_app: Default::default(),
             marked_text: Default::default(),
@@ -887,13 +904,14 @@ impl WinitView {
         });
     }
 
-    fn surface_resized(&self) {
+    pub(super) fn surface_resized(&self) {
         let Some(window) = (**self).window() else {
             return;
         };
-        let size = self.surface_size();
         let window_id = window_id(&window);
+        let view = self.retain();
         self.ivars().app_state.maybe_queue_with_handler(move |app, event_loop| {
+            let size = view.surface_size();
             app.window_event(event_loop, window_id, WindowEvent::SurfaceResized(size));
         });
     }
@@ -971,6 +989,7 @@ impl WinitView {
         }
         self.ivars().ime_capabilities.set(Some(capabilities));
         *self.ivars().marked_text.borrow_mut() = NSMutableAttributedString::new();
+        self.ivars().pending_commit.set(false);
     }
     pub(super) fn disable_ime(&self) {
         // see above
@@ -982,6 +1001,7 @@ impl WinitView {
         // we probably don't need to do this, but again this mirrors the prior behavior of
         // `set_ime_allowed`
         *self.ivars().marked_text.borrow_mut() = NSMutableAttributedString::new();
+        self.ivars().pending_commit.set(false);
     }
 
     pub(super) fn ime_capabilities(&self) -> Option<ImeCapabilities> {
