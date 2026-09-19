@@ -74,6 +74,7 @@ changelog entry.
   applications can ignore activation clicks for buttons or destructive actions while accepting
   them for low-risk actions like selection or scrolling. Always `false` on other platforms.
 - `winit::event_loop::EventLoopProvider` trait with common event loop methods.
+- On Windows, fix a crash when moving a window that owns windows not created by winit, such as native dialogs or application helper windows.
 
 ### Changed
 
