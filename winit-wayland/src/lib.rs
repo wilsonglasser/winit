@@ -56,12 +56,87 @@ pub use self::window::Window;
 pub trait ActiveEventLoopExtWayland {
     /// True if the [`ActiveEventLoop`] uses Wayland.
     fn is_wayland(&self) -> bool;
+
+    /// True if the compositor can carry a toplevel with a drag-and-drop operation (the
+    /// `xdg-toplevel-drag` protocol), which [`start_toplevel_drag`] needs.
+    ///
+    /// [`start_toplevel_drag`]: Self::start_toplevel_drag
+    fn supports_toplevel_drag(&self) -> bool;
+
+    /// Start a drag-and-drop operation from `source` that carries the window `toplevel` with it.
+    ///
+    /// The compositor moves `toplevel` with the cursor until the drag ends, and that window takes
+    /// no part in choosing the drop target, so the windows underneath it see the drag the usual
+    /// way ([`DragEntered`], [`DragPosition`], [`DragDropped`]). This is how a tab torn out of a
+    /// window can be shown as a window of its own while it is still being dragged.
+    ///
+    /// `offset` is where `toplevel` sits relative to the cursor, in its surface coordinates.
+    /// `mime_type` names what is being dragged to the windows it passes over; the drag carries
+    /// no data, so a private type the application recognises is what belongs here. Like
+    /// [`start_drag`], this has to be called while a pointer button is held in `source`, and it
+    /// ends with [`OutgoingDragDropped`] or [`OutgoingDragCanceled`] on that window.
+    ///
+    /// Fails with [`TransferError::NotSupported`] when the event loop is not a Wayland one or
+    /// the compositor does not offer the protocol.
+    ///
+    /// [`DragEntered`]: winit_core::event::WindowEvent::DragEntered
+    /// [`DragPosition`]: winit_core::event::WindowEvent::DragPosition
+    /// [`DragDropped`]: winit_core::event::WindowEvent::DragDropped
+    /// [`OutgoingDragDropped`]: winit_core::event::WindowEvent::OutgoingDragDropped
+    /// [`OutgoingDragCanceled`]: winit_core::event::WindowEvent::OutgoingDragCanceled
+    /// [`start_drag`]: CoreActiveEventLoop::start_drag
+    /// [`TransferError::NotSupported`]: winit_core::error::TransferError::NotSupported
+    fn start_toplevel_drag(
+        &self,
+        source: WindowId,
+        toplevel: WindowId,
+        offset: (i32, i32),
+        mime_type: &str,
+    ) -> Result<DataTransferId, winit_core::error::TransferError>;
 }
 
 impl ActiveEventLoopExtWayland for dyn CoreActiveEventLoop + '_ {
     #[inline]
     fn is_wayland(&self) -> bool {
         self.cast_ref::<ActiveEventLoop>().is_some()
+    }
+
+    fn supports_toplevel_drag(&self) -> bool {
+        self.cast_ref::<ActiveEventLoop>().is_some_and(ActiveEventLoop::supports_toplevel_drag)
+    }
+
+    fn start_toplevel_drag(
+        &self,
+        source: WindowId,
+        toplevel: WindowId,
+        offset: (i32, i32),
+        mime_type: &str,
+    ) -> Result<DataTransferId, winit_core::error::TransferError> {
+        use winit_core::data_transfer::DataTransferSendBuilder;
+        use winit_core::event_loop::DndAction;
+
+        let event_loop = self.cast_ref::<ActiveEventLoop>().ok_or(
+            winit_core::error::TransferError::NotSupported(
+                winit_core::error::NotSupportedError::new(
+                    "Carrying a toplevel with a drag needs a Wayland event loop",
+                ),
+            ),
+        )?;
+        // Nothing is transferred: the type only says what the drag is.
+        let send_data = DataTransferSendBuilder::new(())
+            .with_type(MimeType::parse(mime_type.to_owned()), |_, _| Some(Vec::<u8>::new()))
+            .build();
+        event_loop.start_drag_with(
+            source,
+            send_data,
+            &[DndAction::Copy],
+            None,
+            Some(event_loop::CarriedToplevel {
+                window: toplevel,
+                x_offset: offset.0,
+                y_offset: offset.1,
+            }),
+        )
     }
 }
 

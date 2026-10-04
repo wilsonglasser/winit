@@ -895,6 +895,32 @@ impl RootActiveEventLoop for ActiveEventLoop {
         action_mask: &[DndAction],
         icon: Option<DragIcon>,
     ) -> Result<DataTransferId, TransferError> {
+        self.start_drag_with(source, send_data, action_mask, icon, None)
+    }
+}
+
+/// A toplevel to carry with a drag: the window and where it sits relative to the cursor.
+pub(crate) struct CarriedToplevel {
+    pub(crate) window: WindowId,
+    pub(crate) x_offset: i32,
+    pub(crate) y_offset: i32,
+}
+
+impl ActiveEventLoop {
+    /// Whether the compositor can carry a toplevel with a drag (`xdg_toplevel_drag_manager_v1`).
+    pub(crate) fn supports_toplevel_drag(&self) -> bool {
+        self.state.borrow().xdg_toplevel_drag.is_some()
+    }
+
+    /// [`CoreActiveEventLoop::start_drag`], optionally carrying a toplevel with the drag.
+    pub(crate) fn start_drag_with(
+        &self,
+        source: WindowId,
+        send_data: Box<dyn DataTransferSend>,
+        action_mask: &[DndAction],
+        icon: Option<DragIcon>,
+        carried: Option<CarriedToplevel>,
+    ) -> Result<DataTransferId, TransferError> {
         const NO_POINTER_CAP_ERROR_MSG: &str =
             "Tried to initiate drag, but source window does not have the pointer capability";
 
@@ -949,6 +975,24 @@ impl RootActiveEventLoop for ActiveEventLoop {
             })
         };
 
+        // The object that ties a toplevel to this drag has to exist before the drag starts.
+        let toplevel_drag = match &carried {
+            Some(_) => {
+                let manager = state.xdg_toplevel_drag.as_ref().ok_or(NotSupportedError::new(
+                    "Tried to carry a toplevel with a drag, but the compositor has no \
+                     xdg_toplevel_drag_manager_v1",
+                ))?;
+                Some(crate::types::xdg_toplevel_drag::ToplevelDrag(
+                    manager.global().get_xdg_toplevel_drag(
+                        data_source.inner(),
+                        &self.queue_handle,
+                        sctk::globals::GlobalData,
+                    ),
+                ))
+            },
+            None => None,
+        };
+
         // New scope to ensure we drop the locks as soon as possible.
         let transfer_id = {
             let windows = state.windows.borrow();
@@ -976,6 +1020,19 @@ impl RootActiveEventLoop for ActiveEventLoop {
 
             data_source.start_drag(data_device, source_surface, icon_surface.as_ref(), serial);
 
+            // From here on the compositor moves the attached window with the cursor, and that
+            // window takes no part in choosing the drop target.
+            if let (Some(carried), Some(toplevel_drag)) = (&carried, &toplevel_drag) {
+                let carried_window_mutex = windows.get(&carried.window).ok_or(os_error!(
+                    "Tried to carry a toplevel with a drag, but its window ID was invalid"
+                ))?;
+                let carried_window_state = carried_window_mutex.lock().unwrap();
+                let xdg_toplevel = carried_window_state.window.xdg_toplevel().ok_or(os_error!(
+                    "Tried to carry a toplevel with a drag, but its window has no xdg_toplevel"
+                ))?;
+                toplevel_drag.0.attach(xdg_toplevel, carried.x_offset, carried.y_offset);
+            }
+
             make_data_transfer_id(data_device.inner().id(), serial)
         };
 
@@ -991,6 +1048,7 @@ impl RootActiveEventLoop for ActiveEventLoop {
             send_data,
             icon_surface,
             source,
+            toplevel_drag,
         ));
 
         Ok(transfer_id)

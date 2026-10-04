@@ -37,6 +37,7 @@ use crate::types::wp_fractional_scaling::FractionalScalingManager;
 use crate::types::wp_tablet_input_v2::TabletManager;
 use crate::types::wp_viewporter::ViewporterState;
 use crate::types::xdg_activation::XdgActivationState;
+use crate::types::xdg_toplevel_drag::XdgToplevelDragState;
 use crate::types::xdg_toplevel_icon_manager::XdgToplevelIconManagerState;
 use crate::window::WindowState;
 use crate::window::handles::WindowRequests;
@@ -95,6 +96,9 @@ pub struct WinitState {
 
     /// Xdg activation.
     pub xdg_activation: Option<XdgActivationState>,
+
+    /// Xdg toplevel drag: a window carried by a drag-and-drop operation.
+    pub xdg_toplevel_drag: Option<XdgToplevelDragState>,
 
     /// Xdg toplevel icon manager
     pub xdg_toplevel_icon_manager: Option<XdgToplevelIconManagerState>,
@@ -202,6 +206,7 @@ impl WinitState {
 
             xdg_shell: XdgShell::bind(globals, queue_handle).map_err(|err| os_error!(err))?,
             xdg_activation: XdgActivationState::bind(globals, queue_handle).ok(),
+            xdg_toplevel_drag: XdgToplevelDragState::bind(globals, queue_handle).ok(),
             xdg_toplevel_icon_manager: XdgToplevelIconManagerState::bind(globals, queue_handle)
                 .ok(),
 

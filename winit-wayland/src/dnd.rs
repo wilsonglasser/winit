@@ -295,7 +295,7 @@ impl MimeType {
         if charset == "utf-8" { Ok(Charset::Utf8) } else { Err(UnexpectedCharsetError(charset)) }
     }
 
-    fn parse(mime: String) -> Self {
+    pub(crate) fn parse(mime: String) -> Self {
         let hint = Self::MIME_HINT_MAP
             .iter()
             .find_map(|(haystack, hint)| (*haystack == &*mime).then_some(*hint))
@@ -531,6 +531,9 @@ pub struct DragSource {
     pub(crate) window_id: WindowId,
     /// (Optionally) an icon for the drag-and-drop operation.
     _icon: Option<WlSurface>,
+    /// (Optionally) the toplevel carried by the drag. Destroyed with the source, which is after
+    /// the drag has ended, as the protocol requires.
+    _toplevel_drag: Option<crate::types::xdg_toplevel_drag::ToplevelDrag>,
 }
 
 impl DragSource {
@@ -540,8 +543,10 @@ impl DragSource {
         data: Box<dyn DataTransferSend>,
         icon: Option<WlSurface>,
         window_id: WindowId,
+        toplevel_drag: Option<crate::types::xdg_toplevel_drag::ToplevelDrag>,
     ) -> Self {
         Self {
+            _toplevel_drag: toplevel_drag,
             data_transfer_id,
             _data_source: data_source,
             data,
