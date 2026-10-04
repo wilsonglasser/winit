@@ -58,6 +58,7 @@ objc2-app-kit = { workspace = true, features = [
     "NSTrackingArea",
     "NSToolbar",
     "NSView",
+    "NSVisualEffectView",
     "NSWindow",
     "NSWindowScripting",
     "NSWindowTabGroup",
@@ -127,5 +128,5 @@ winit-common = { workspace = true, features = [
 winit.workspace = true
 
 [package.metadata.docs.rs]
-all-features = true
+features = ["serde"]
 targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
