@@ -46,6 +46,9 @@ changelog entry.
 - On Wayland, use the touch serial for `Window::drag_window`, `Window::drag_resize_window` and `Window::show_window_menu` when the interaction was started by touch.
 - On Windows, fix a crash when moving a window that owns windows not created by winit, such as native dialogs or application helper windows.
 - On macOS, deliver `EventLoopProxy::wake_up` and queued window events after the current event handler returns when a nested run loop (a modal, a library spinning the loop while it waits) reaches them mid-event, instead of panicking on re-entrancy.
+- On Windows, avoid overflow when negating minimum mouse-wheel deltas.
+- On X11, reset the drag and drop state when a drag operation ends. A later drag no longer reuses the state of a previous drag.
+- On Wayland, fix the text input being destroyed whenever a seat capability changed. This made IME input stop working in already-running applications after the seat's capabilities were updated.
 
 ### Changed
 
