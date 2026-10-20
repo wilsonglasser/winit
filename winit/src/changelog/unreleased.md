@@ -49,9 +49,18 @@ changelog entry.
 - On Windows, avoid overflow when negating minimum mouse-wheel deltas.
 - On X11, reset the drag and drop state when a drag operation ends. A later drag no longer reuses the state of a previous drag.
 - On Wayland, fix the text input being destroyed whenever a seat capability changed. This made IME input stop working in already-running applications after the seat's capabilities were updated.
+- On Wayland, fix a panic when a popup is dropped before its queued compositor
+  updates are processed.
+- On macOS, forward mouse click events to AppKit. This makes IME semantics more similar to native macOS applications, particularly when an IME is clicked out of.
+- On macOS, discard the input method's marked text when IME is disabled, so an unfinished composition is not resumed (and committed again) when IME is re-enabled.
+
+### Added
+
+- Add `WindowEvent::MouseWheel::source: ScrollSource`, telling a mouse wheel from fingers on a touchpad from system-driven momentum scrolling, implemented on macOS and Wayland.
 
 ### Changed
 
+- No longer send an empty `Ime::Preedit` before `Ime::Commit`.
 - Removed the `url` dependency from `winit-core`, along with `SendData::from_file_paths`,
   `TypedData::try_as_file_paths` and `impl From<Vec<url::Url>> for SendData`. Use `SendData::Uris`
   / `TypedData::try_as_uris` with `file:` URIs instead.

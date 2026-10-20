@@ -20,7 +20,7 @@ use objc2_foundation::{
 use tracing::{debug_span, trace_span};
 use winit_core::event::{
     DeviceEvent, ElementState, Ime, KeyEvent, Modifiers, MouseButton, MouseScrollDelta,
-    PointerKind, PointerSource, TouchPhase, WindowEvent,
+    PointerKind, PointerSource, ScrollSource, TouchPhase, WindowEvent,
 };
 use winit_core::keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NamedKey};
 use winit_core::window::ImeCapabilities;
@@ -400,11 +400,6 @@ define_class!(
             let pending_commit = self.ivars().pending_commit.get();
             let ime_enabled = self.is_ime_enabled();
 
-            // Clear preedit if there is marked text.
-            if has_marked {
-                self.queue_event(WindowEvent::Ime(Ime::Preedit(String::new(), None)));
-            }
-
             // Only commit via IME if there was a real composition session.
             // Some IMEs send insertText for all typing (e.g. spaces, English chars)
             // which should go through keyboard input instead of paste.
@@ -412,6 +407,8 @@ define_class!(
                 self.ivars().pending_commit.set(false);
                 self.queue_event(WindowEvent::Ime(Ime::Commit(string)));
                 self.ivars().ime_state.set(ImeState::Committed);
+            } else if has_marked {
+                self.queue_event(WindowEvent::Ime(Ime::Preedit(String::new(), None)));
             }
         }
 
@@ -596,6 +593,9 @@ define_class!(
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, event: &NSEvent) {
             let _entered = debug_span!("mouseDown:").entered();
+            if self.handle_event(event) {
+                return;
+            }
             self.mouse_motion(event);
             self.mouse_click(event, ElementState::Pressed);
         }
@@ -603,6 +603,9 @@ define_class!(
         #[unsafe(method(mouseUp:))]
         fn mouse_up(&self, event: &NSEvent) {
             let _entered = debug_span!("mouseUp:").entered();
+            if self.handle_event(event) {
+                return;
+            }
             self.mouse_motion(event);
             self.mouse_click(event, ElementState::Released);
         }
@@ -610,6 +613,9 @@ define_class!(
         #[unsafe(method(rightMouseDown:))]
         fn right_mouse_down(&self, event: &NSEvent) {
             let _entered = debug_span!("rightMouseDown:").entered();
+            if self.handle_event(event) {
+                return;
+            }
             self.mouse_motion(event);
             self.mouse_click(event, ElementState::Pressed);
         }
@@ -617,6 +623,9 @@ define_class!(
         #[unsafe(method(rightMouseUp:))]
         fn right_mouse_up(&self, event: &NSEvent) {
             let _entered = debug_span!("rightMouseUp:").entered();
+            if self.handle_event(event) {
+                return;
+            }
             self.mouse_motion(event);
             self.mouse_click(event, ElementState::Released);
         }
@@ -624,6 +633,9 @@ define_class!(
         #[unsafe(method(otherMouseDown:))]
         fn other_mouse_down(&self, event: &NSEvent) {
             let _entered = debug_span!("otherMouseDown:").entered();
+            if self.handle_event(event) {
+                return;
+            }
             self.mouse_motion(event);
             self.mouse_click(event, ElementState::Pressed);
         }
@@ -631,6 +643,9 @@ define_class!(
         #[unsafe(method(otherMouseUp:))]
         fn other_mouse_up(&self, event: &NSEvent) {
             let _entered = debug_span!("otherMouseUp:").entered();
+            if self.handle_event(event) {
+                return;
+            }
             self.mouse_motion(event);
             self.mouse_click(event, ElementState::Released);
         }
@@ -638,24 +653,36 @@ define_class!(
         #[unsafe(method(mouseMoved:))]
         fn mouse_moved(&self, event: &NSEvent) {
             let _entered = debug_span!("mouseMoved:").entered();
+            if self.handle_event(event) {
+                return;
+            }
             self.mouse_motion(event);
         }
 
         #[unsafe(method(mouseDragged:))]
         fn mouse_dragged(&self, event: &NSEvent) {
             let _entered = debug_span!("mouseDragged:").entered();
+            if self.handle_event(event) {
+                return;
+            }
             self.mouse_motion(event);
         }
 
         #[unsafe(method(rightMouseDragged:))]
         fn right_mouse_dragged(&self, event: &NSEvent) {
             let _entered = debug_span!("rightMouseDragged:").entered();
+            if self.handle_event(event) {
+                return;
+            }
             self.mouse_motion(event);
         }
 
         #[unsafe(method(otherMouseDragged:))]
         fn other_mouse_dragged(&self, event: &NSEvent) {
             let _entered = debug_span!("otherMouseDragged:").entered();
+            if self.handle_event(event) {
+                return;
+            }
             self.mouse_motion(event);
         }
 
@@ -707,15 +734,26 @@ define_class!(
             // be mutually exclusive anyhow, which is why the API is rather incoherent). If no
             // momentum phase is recorded (or rather, the started/ended cases of the
             // momentum phase) then we report the touch phase.
+            let momentum_phase = event.momentumPhase();
+            let touch_phase = event.phase();
             #[allow(non_upper_case_globals)]
-            let phase = match event.momentumPhase() {
+            let phase = match momentum_phase {
                 NSEventPhase::MayBegin | NSEventPhase::Began => TouchPhase::Started,
                 NSEventPhase::Ended | NSEventPhase::Cancelled => TouchPhase::Ended,
-                _ => match event.phase() {
+                _ => match touch_phase {
                     NSEventPhase::MayBegin | NSEventPhase::Began => TouchPhase::Started,
                     NSEventPhase::Ended | NSEventPhase::Cancelled => TouchPhase::Ended,
                     _ => TouchPhase::Moved,
                 },
+            };
+
+            // Mouse wheels have neither phase. Trackpads have one of them.
+            let source = if momentum_phase != NSEventPhase::None {
+                ScrollSource::Momentum
+            } else if touch_phase != NSEventPhase::None {
+                ScrollSource::Finger
+            } else {
+                ScrollSource::Wheel
             };
 
             self.update_modifiers(event, false);
@@ -723,7 +761,7 @@ define_class!(
             self.ivars().app_state.maybe_queue_with_handler(move |app, event_loop| {
                 app.device_event(event_loop, None, DeviceEvent::MouseWheel { delta })
             });
-            self.queue_event(WindowEvent::MouseWheel { device_id: None, delta, phase });
+            self.queue_event(WindowEvent::MouseWheel { device_id: None, delta, phase, source });
         }
 
         #[unsafe(method(magnifyWithEvent:))]
@@ -993,6 +1031,14 @@ impl WinitView {
         self.ivars().pending_commit.set(false);
     }
     pub(super) fn disable_ime(&self) {
+        // Tell the input method to drop any composition in progress. Otherwise it keeps the
+        // marked text and continues composing it once IME is enabled again (e.g. when focus
+        // returns to a text input), even though the application has already ended it.
+        if self.ivars().marked_text.borrow().length() > 0 {
+            if let Some(input_context) = self.inputContext() {
+                input_context.discardMarkedText();
+            }
+        }
         // see above
         self.ivars().ime_capabilities.set(None);
         if self.ivars().ime_state.get() != ImeState::Disabled {
@@ -1179,6 +1225,11 @@ impl WinitView {
         dragging_session
             .take_if(|session| session.draggingSequenceNumber() == drag.draggingSequenceNumber())
             .is_some()
+    }
+
+    /// Returns true iff the event was consumed by the input context.
+    fn handle_event(&self, event: &NSEvent) -> bool {
+        self.inputContext().map(|input_context| input_context.handleEvent(event)).unwrap_or(false)
     }
 
     fn mouse_click(&self, event: &NSEvent, button_state: ElementState) {
