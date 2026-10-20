@@ -13,7 +13,7 @@ use objc2_app_kit::{
     NSPasteboardTypePNG, NSPasteboardTypeSound, NSPasteboardTypeString, NSPasteboardTypeTIFF,
     NSPasteboardWriting, NSPasteboardWritingOptions,
 };
-use objc2_foundation::{NSArray, NSData, NSObject, NSObjectProtocol, NSString};
+use objc2_foundation::{NSArray, NSData, NSObject, NSObjectProtocol, NSString, NSURL};
 use winit_core::data_transfer::{
     DataTransfer, DataTransferId, DataTransferSend, SendData, TransferType, TypeHint, TypedData,
 };
@@ -282,7 +282,7 @@ impl TypedData for PasteboardValue {
                     None => {
                         return pasteboard
                             .stringForType(unsafe { NSPasteboardTypeFileURL })
-                            .map(|ns_str| vec![ns_str.to_string()])
+                            .map(|ns_str| vec![file_path_uri(ns_str)])
                             .ok_or_else(|| io::ErrorKind::InvalidData.into());
                     },
                 };
@@ -300,7 +300,7 @@ impl TypedData for PasteboardValue {
             Ok(items
                 .into_iter()
                 .filter_map(|item| item.stringForType(unsafe { NSPasteboardTypeFileURL }))
-                .map(|ns_str| ns_str.to_string())
+                .map(file_path_uri)
                 .collect())
         })
     }
@@ -317,6 +317,27 @@ impl TypedData for PasteboardValue {
                 .ok_or_else(|| io::ErrorKind::InvalidData.into())
         })
     }
+}
+
+/// The `file:` URI a pasteboard item names, by PATH.
+///
+/// What a source writes under `NSPasteboardTypeFileURL` may be a file
+/// *reference* URL, `file:///.file/id=<volume>.<inode>`, which names the file
+/// by identity rather than by place: Finder drops one (macOS 26, at least).
+/// Only Foundation can read that form. On disk `/.file` is a plain
+/// empty file in the root directory, so a consumer that turns the URI into a
+/// path and hands it to the file system gets `ENOTDIR`, not the file. Here it
+/// is resolved to the file's current path (`filePathURL`); an ordinary
+/// path-based URI is returned as it came. A file that is gone by the time the
+/// drop is read has no path any more, and the reference URI is passed on as
+/// it was, so the consumer's own error names what was dropped.
+fn file_path_uri(uri: Retained<NSString>) -> String {
+    NSURL::URLWithString(&uri)
+        .filter(|url| url.isFileReferenceURL())
+        .and_then(|url| url.filePathURL())
+        .and_then(|url| url.absoluteString())
+        .unwrap_or(uri)
+        .to_string()
 }
 
 #[derive(Debug)]
