@@ -386,6 +386,7 @@ pub enum ActivationPolicy {
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowAttributesMacOS {
     pub(crate) movable_by_window_background: bool,
+    pub(crate) mouse_down_can_move_window: bool,
     pub(crate) titlebar_transparent: bool,
     pub(crate) title_hidden: bool,
     pub(crate) titlebar_hidden: bool,
@@ -407,6 +408,30 @@ impl WindowAttributesMacOS {
     #[inline]
     pub fn with_movable_by_window_background(mut self, movable_by_window_background: bool) -> Self {
         self.movable_by_window_background = movable_by_window_background;
+        self
+    }
+
+    /// Whether a mouse down on the window's content view may move the window.
+    ///
+    /// AppKit asks the view under a mouse down whether that click may drag the window
+    /// (`-[NSView mouseDownCanMoveWindow]`). The default answer lets a window with a
+    /// [transparent titlebar][Self::with_titlebar_transparent] and a
+    /// [full-size content view][Self::with_fullsize_content_view] be dragged by the band of
+    /// content under its titlebar, so a press there that the application meant for its own
+    /// widgets (a tab dragged along a tab strip drawn in that band) moves the whole window.
+    ///
+    /// Setting this to `false` makes the content view keep every mouse down to itself: the
+    /// application then moves the window explicitly with [`Window::drag_window`] from the
+    /// areas it wants draggable. It also disables
+    /// [`with_movable_by_window_background`][Self::with_movable_by_window_background], which
+    /// relies on the same answer.
+    ///
+    /// The default is `true` (AppKit's own answer).
+    ///
+    /// [`Window::drag_window`]: winit_core::window::Window::drag_window
+    #[inline]
+    pub fn with_mouse_down_can_move_window(mut self, mouse_down_can_move_window: bool) -> Self {
+        self.mouse_down_can_move_window = mouse_down_can_move_window;
         self
     }
 
@@ -529,6 +554,7 @@ impl Default for WindowAttributesMacOS {
     fn default() -> Self {
         Self {
             movable_by_window_background: false,
+            mouse_down_can_move_window: true,
             titlebar_transparent: false,
             title_hidden: false,
             titlebar_hidden: false,

@@ -58,6 +58,7 @@ changelog entry.
 ### Added
 
 - Add `WindowEvent::MouseWheel::source: ScrollSource`, telling a mouse wheel from fingers on a touchpad from system-driven momentum scrolling, implemented on macOS and Wayland.
+- On macOS, add `WindowAttributesMacOS::with_mouse_down_can_move_window`. Set to `false`, the content view keeps every mouse down to itself, so a press on content under a transparent titlebar no longer moves the window before the application sees it.
 
 ### Changed
 

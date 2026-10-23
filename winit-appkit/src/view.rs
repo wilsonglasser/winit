@@ -148,6 +148,12 @@ pub struct ViewState {
 
     /// The state of the `Option` as `Alt`.
     option_as_alt: Cell<OptionAsAlt>,
+
+    /// `false` makes `mouseDownCanMoveWindow` answer `NO`, see
+    /// [`WindowAttributesMacOS::with_mouse_down_can_move_window`].
+    ///
+    /// [`WindowAttributesMacOS::with_mouse_down_can_move_window`]: crate::WindowAttributesMacOS::with_mouse_down_can_move_window
+    mouse_down_can_move_window: bool,
 }
 
 define_class!(
@@ -837,6 +843,16 @@ define_class!(
             true
         }
 
+        #[unsafe(method(mouseDownCanMoveWindow))]
+        fn mouse_down_can_move_window(&self) -> bool {
+            let _entered = debug_span!("mouseDownCanMoveWindow").entered();
+            // AppKit's own answer unless the application keeps every mouse down to itself:
+            // under a transparent titlebar that answer lets a press on the content start a
+            // window drag before the application has seen it.
+            self.ivars().mouse_down_can_move_window
+                && unsafe { msg_send![super(self), mouseDownCanMoveWindow] }
+        }
+
         #[unsafe(method(acceptsFirstMouse:))]
         fn accepts_first_mouse(&self, event: Option<&NSEvent>) -> bool {
             let _entered = debug_span!("acceptsFirstMouse:").entered();
@@ -858,6 +874,7 @@ impl WinitView {
     pub(super) fn new(
         app_state: &Rc<AppState>,
         option_as_alt: OptionAsAlt,
+        mouse_down_can_move_window: bool,
         mtm: MainThreadMarker,
     ) -> Retained<Self> {
         let this = mtm.alloc().set_ivars(ViewState {
@@ -877,6 +894,7 @@ impl WinitView {
             marked_text: Default::default(),
             next_click_is_activation: Default::default(),
             option_as_alt: Cell::new(option_as_alt),
+            mouse_down_can_move_window,
         });
         let this: Retained<Self> = unsafe { msg_send![super(this), init] };
         *this.ivars().input_source.borrow_mut() = this.current_input_source();
