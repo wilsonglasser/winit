@@ -1091,15 +1091,23 @@ impl WinitState {
 
         // From here on the compositor moves the attached window with the cursor, and that
         // window takes no part in choosing the drop target.
+        // The carried window may be the source itself (a window dragged by its own content),
+        // whose state is already locked above: locking it again would never return.
         if let (Some(carried), Some(toplevel_drag)) = (&carried, &toplevel_drag) {
-            let carried_window_mutex = windows.get(&carried.window).ok_or(os_error!(
-                "Tried to carry a toplevel with a drag, but its window ID was invalid"
-            ))?;
-            let carried_window_state = carried_window_mutex.lock().unwrap();
-            let xdg_toplevel = carried_window_state.window.xdg_toplevel().ok_or(os_error!(
-                "Tried to carry a toplevel with a drag, but its window has no xdg_toplevel"
-            ))?;
-            toplevel_drag.0.attach(xdg_toplevel, carried.x_offset, carried.y_offset);
+            const NO_TOPLEVEL: &str =
+                "Tried to carry a toplevel with a drag, but its window has no xdg_toplevel";
+            if carried.window == source {
+                let xdg_toplevel = window.window.xdg_toplevel().ok_or(os_error!(NO_TOPLEVEL))?;
+                toplevel_drag.0.attach(xdg_toplevel, carried.x_offset, carried.y_offset);
+            } else {
+                let carried_window_mutex = windows.get(&carried.window).ok_or(os_error!(
+                    "Tried to carry a toplevel with a drag, but its window ID was invalid"
+                ))?;
+                let carried_window_state = carried_window_mutex.lock().unwrap();
+                let xdg_toplevel =
+                    carried_window_state.window.xdg_toplevel().ok_or(os_error!(NO_TOPLEVEL))?;
+                toplevel_drag.0.attach(xdg_toplevel, carried.x_offset, carried.y_offset);
+            }
         }
 
         let transfer_id = make_data_transfer_id(data_device.inner().id(), serial);
