@@ -116,7 +116,6 @@ objc2-foundation = { workspace = true, features = [
     "NSRunLoop",
     "NSString",
     "NSThread",
-    # `filePathURL`, which turns the file REFERENCE URL Finder drops into a path.
     "NSURL",
     "NSValue",
 ] }

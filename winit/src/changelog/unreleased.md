@@ -40,6 +40,14 @@ changelog entry.
 
 ## Unreleased
 
+### Added
+
+- Add `ActiveEventLoop::clipboard` and `ActiveEventLoop::set_clipboard` for
+  interacting with the system clipboard through the data transfer API,
+  implemented on Wayland, X11, macOS and Windows.
+- Add `ActiveEventLoop::primary_selection_ext` for interacting with
+  the primary selection through the data transfer API on Wayland and X11.
+
 ### Fixed
 
 - On Windows, fix a crash occurring when trying to create a DXGI surface on a window that is both fullscreen and always on top.
@@ -47,6 +55,8 @@ changelog entry.
 - On Windows, fix a crash when moving a window that owns windows not created by winit, such as native dialogs or application helper windows.
 - On macOS, deliver `EventLoopProxy::wake_up` and queued window events after the current event handler returns when a nested run loop (a modal, a library spinning the loop while it waits) reaches them mid-event, instead of panicking on re-entrancy.
 - On Windows, avoid overflow when negating minimum mouse-wheel deltas.
+- On Windows, fix IME preedit cursor offsets around surrogate pairs when no
+  target clause is selected.
 - On X11, reset the drag and drop state when a drag operation ends. A later drag no longer reuses the state of a previous drag.
 - On Wayland, fix the text input being destroyed whenever a seat capability changed. This made IME input stop working in already-running applications after the seat's capabilities were updated.
 - On Wayland, fix a panic when a popup is dropped before its queued compositor
