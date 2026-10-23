@@ -54,11 +54,13 @@ changelog entry.
 - On macOS, forward mouse click events to AppKit. This makes IME semantics more similar to native macOS applications, particularly when an IME is clicked out of.
 - On macOS, discard the input method's marked text when IME is disabled, so an unfinished composition is not resumed (and committed again) when IME is re-enabled.
 - On Windows, fix a deadlock when an input method answered an IME request with a composition message while the request still held the window state lock.
+- On macOS, hide the empty toolbar behind a unified titlebar with the menu bar in native fullscreen, instead of keeping it and the window controls over the content.
 
 ### Added
 
 - Add `WindowEvent::MouseWheel::source: ScrollSource`, telling a mouse wheel from fingers on a touchpad from system-driven momentum scrolling, implemented on macOS and Wayland.
 - On macOS, add `WindowAttributesMacOS::with_mouse_down_can_move_window`. Set to `false`, the content view keeps every mouse down to itself, so a press on content under a transparent titlebar no longer moves the window before the application sees it.
+- On macOS, add `WindowExtMacOS::set_unified_titlebar_compact` and `WindowAttributesMacOS::with_unified_titlebar_compact`, the unified titlebar with the compact toolbar style.
 
 ### Changed
 

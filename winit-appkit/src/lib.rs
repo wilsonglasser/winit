@@ -191,6 +191,18 @@ pub trait WindowExtMacOS {
     /// Getter for the [`WindowExtMacOS::set_unified_titlebar`].
     fn unified_titlebar(&self) -> bool;
 
+    /// Like [`WindowExtMacOS::set_unified_titlebar`], with the compact toolbar style
+    /// ([`NSWindowToolbarStyleUnifiedCompact`]): a titlebar taller than the plain one and
+    /// shorter than the unified one, with the window controls centred in it.
+    ///
+    /// Turning it off removes the toolbar only when it is the compact one.
+    ///
+    /// [`NSWindowToolbarStyleUnifiedCompact`]: https://developer.apple.com/documentation/appkit/nswindow/toolbarstyle-swift.enum/unifiedcompact
+    fn set_unified_titlebar_compact(&self, unified_titlebar_compact: bool);
+
+    /// Getter for the [`WindowExtMacOS::set_unified_titlebar_compact`].
+    fn unified_titlebar_compact(&self) -> bool;
+
     /// Sets whether the window can be shown on the same Space as a fullscreen window.
     ///
     /// This corresponds to [`NSWindowCollectionBehaviorFullScreenAuxiliary`], and is useful
@@ -332,6 +344,18 @@ impl WindowExtMacOS for dyn Window + '_ {
     }
 
     #[inline]
+    fn set_unified_titlebar_compact(&self, unified_titlebar_compact: bool) {
+        let window = self.cast_ref::<AppKitWindow>().unwrap();
+        window.maybe_wait_on_main(move |w| w.set_unified_titlebar_compact(unified_titlebar_compact))
+    }
+
+    #[inline]
+    fn unified_titlebar_compact(&self) -> bool {
+        let window = self.cast_ref::<AppKitWindow>().unwrap();
+        window.maybe_wait_on_main(|w| w.unified_titlebar_compact())
+    }
+
+    #[inline]
     fn set_fullscreen_auxiliary(&self, fullscreen_auxiliary: bool) {
         let window = self.cast_ref::<AppKitWindow>().unwrap();
         window.maybe_wait_on_main(move |w| w.set_fullscreen_auxiliary(fullscreen_auxiliary))
@@ -398,6 +422,7 @@ pub struct WindowAttributesMacOS {
     pub(crate) option_as_alt: OptionAsAlt,
     pub(crate) borderless_game: bool,
     pub(crate) unified_titlebar: bool,
+    pub(crate) unified_titlebar_compact: bool,
     pub(crate) panel: bool,
     pub(crate) fullscreen_auxiliary: bool,
     pub(crate) blur_material: BlurMaterial,
@@ -525,6 +550,14 @@ impl WindowAttributesMacOS {
         self
     }
 
+    /// See [`WindowExtMacOS::set_unified_titlebar_compact`] for details on what this means if
+    /// set. Takes precedence over [`with_unified_titlebar`][Self::with_unified_titlebar].
+    #[inline]
+    pub fn with_unified_titlebar_compact(mut self, unified_titlebar_compact: bool) -> Self {
+        self.unified_titlebar_compact = unified_titlebar_compact;
+        self
+    }
+
     /// Use [`NSPanel`] window with [`NonactivatingPanel`] window style mask instead of
     /// [`NSWindow`].
     ///
@@ -566,6 +599,7 @@ impl Default for WindowAttributesMacOS {
             option_as_alt: Default::default(),
             borderless_game: false,
             unified_titlebar: false,
+            unified_titlebar_compact: false,
             panel: false,
             fullscreen_auxiliary: false,
             blur_material: Default::default(),

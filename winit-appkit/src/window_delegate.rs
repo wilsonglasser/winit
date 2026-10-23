@@ -298,6 +298,21 @@ define_class!(
                     | NSApplicationPresentationOptions::HideMenuBar;
             }
 
+            // AppKit keeps a window's toolbar on screen in fullscreen unless told otherwise. An
+            // empty one (the toolbar behind `set_unified_titlebar` and
+            // `set_unified_titlebar_compact`, there only to size the titlebar) has nothing to
+            // show, and with a transparent titlebar over full-size content it would leave the
+            // window controls standing over the content for the whole fullscreen session. Hide
+            // it with the menu bar instead, as a window without a toolbar does. AppKit accepts
+            // `AutoHideToolbar` only together with `FullScreen` and `AutoHideMenuBar`.
+            let autohide_menu_bar = NSApplicationPresentationOptions::FullScreen
+                | NSApplicationPresentationOptions::AutoHideMenuBar;
+            if options.contains(autohide_menu_bar)
+                && self.window().toolbar().is_some_and(|toolbar| toolbar.items().is_empty())
+            {
+                options |= NSApplicationPresentationOptions::AutoHideToolbar;
+            }
+
             options
         }
 
@@ -844,7 +859,12 @@ fn new_window(
         if macos_attrs.movable_by_window_background {
             window.setMovableByWindowBackground(true);
         }
-        if macos_attrs.unified_titlebar {
+        if macos_attrs.unified_titlebar_compact {
+            // The toolbar style is ignored if there is no toolbar, so it is
+            // necessary to add one.
+            window.setToolbar(Some(&NSToolbar::new(mtm)));
+            window.setToolbarStyle(NSWindowToolbarStyle::UnifiedCompact);
+        } else if macos_attrs.unified_titlebar {
             // The toolbar style is ignored if there is no toolbar, so it is
             // necessary to add one.
             window.setToolbar(Some(&NSToolbar::new(mtm)));
@@ -2513,6 +2533,28 @@ impl WindowExtMacOS for WindowDelegate {
         let window = self.window();
 
         window.toolbar().is_some() && window.toolbarStyle() == NSWindowToolbarStyle::Unified
+    }
+
+    fn set_unified_titlebar_compact(&self, unified_titlebar_compact: bool) {
+        let window = self.window();
+
+        if unified_titlebar_compact {
+            let mtm = MainThreadMarker::from(self);
+
+            // The toolbar style is ignored if there is no toolbar, so it is
+            // necessary to add one.
+            window.setToolbar(Some(&NSToolbar::new(mtm)));
+            window.setToolbarStyle(NSWindowToolbarStyle::UnifiedCompact);
+        } else if self.unified_titlebar_compact() {
+            window.setToolbar(None);
+            window.setToolbarStyle(NSWindowToolbarStyle::Automatic);
+        }
+    }
+
+    fn unified_titlebar_compact(&self) -> bool {
+        let window = self.window();
+
+        window.toolbar().is_some() && window.toolbarStyle() == NSWindowToolbarStyle::UnifiedCompact
     }
 
     #[inline]
