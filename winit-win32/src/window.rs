@@ -1098,34 +1098,45 @@ impl CoreWindow for Window {
         let state = self.window_state.clone();
         self.thread_executor.execute_in_thread(move || unsafe {
             let hwnd = window.hwnd();
-            let mut state = state.lock().unwrap();
-            let (capabilities, request_data) = match &request {
-                ImeRequest::Enable(enable) => {
-                    let capabilities = *enable.capabilities();
-                    state.ime_capabilities = Some(capabilities);
-                    ImeContext::set_ime_allowed(hwnd, true);
-                    (capabilities, enable.request_data())
-                },
-                ImeRequest::Update(request_data) => {
-                    if let Some(capabilities) = state.ime_capabilities {
-                        (capabilities, request_data)
-                    } else {
-                        warn!("ime update without IME enabled.");
+            // The IMM calls below send their notifications to this window from inside the call
+            // (`ImmSetCompositionWindow` sends `IMN_SETCOMPOSITIONWINDOW`, `ImmSetCandidateWindow`
+            // `IMN_SETCANDIDATEPOS`), and the input method may answer with `WM_IME_*` messages
+            // whose handlers lock the window state. The lock is not reentrant, so it is released
+            // before any of them runs; the capabilities are written first, so a composition the
+            // call starts already sees them.
+            let (capabilities, request_data, scale_factor) = {
+                let mut state = state.lock().unwrap();
+                match &request {
+                    ImeRequest::Enable(enable) => {
+                        let capabilities = *enable.capabilities();
+                        state.ime_capabilities = Some(capabilities);
+                        (capabilities, enable.request_data(), state.scale_factor)
+                    },
+                    ImeRequest::Update(request_data) => {
+                        if let Some(capabilities) = state.ime_capabilities {
+                            (capabilities, request_data, state.scale_factor)
+                        } else {
+                            warn!("ime update without IME enabled.");
+                            return;
+                        }
+                    },
+                    ImeRequest::Disable => {
+                        state.ime_capabilities = None;
+                        drop(state);
+                        ImeContext::set_ime_allowed(hwnd, false);
                         return;
-                    }
-                },
-                ImeRequest::Disable => {
-                    state.ime_capabilities = None;
-                    ImeContext::set_ime_allowed(window.hwnd(), false);
-                    return;
-                },
-                _ => return,
+                    },
+                    _ => return,
+                }
             };
+
+            if matches!(request, ImeRequest::Enable(_)) {
+                ImeContext::set_ime_allowed(hwnd, true);
+            }
 
             if let Some((spot, size)) = request_data.cursor_area {
                 if capabilities.cursor_area() {
-                    let scale_factor = state.scale_factor;
-                    ImeContext::current(window.hwnd()).set_ime_cursor_area(
+                    ImeContext::current(hwnd).set_ime_cursor_area(
                         spot,
                         size,
                         scale_factor,
