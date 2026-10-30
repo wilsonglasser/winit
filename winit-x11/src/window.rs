@@ -855,6 +855,26 @@ impl UnownedWindow {
             leap!(xconn.select_xinput_events(window.xwindow, ALL_MASTER_DEVICES, mask))
                 .ignore_error();
 
+            // A window that starts maximized says so in `_NET_WM_STATE` before it is
+            // mapped. EWMH has the client write the property itself while the window is
+            // withdrawn; the client message sent after mapping (below) reaches a window
+            // manager that may not have taken the window over yet, which then maps it at
+            // its floating size and maximizes it a moment later, or not at all (Openbox).
+            if window_attrs.maximized {
+                let maximized =
+                    [atoms[_NET_WM_STATE_MAXIMIZED_VERT], atoms[_NET_WM_STATE_MAXIMIZED_HORZ]];
+                let result = xconn.xcb_connection().change_property(
+                    xproto::PropMode::APPEND,
+                    window.xwindow,
+                    atoms[_NET_WM_STATE],
+                    xproto::AtomEnum::ATOM,
+                    32,
+                    maximized.len() as u32,
+                    bytemuck::cast_slice::<u32, u8>(&maximized),
+                );
+                leap!(result).ignore_error();
+            }
+
             // Set visibility (map window)
             if window_attrs.visible {
                 leap!(xconn.xcb_connection().map_window(window.xwindow)).ignore_error();
